@@ -1,7 +1,7 @@
 const puppeteer = require('puppeteer');
 const fs = require('fs');
 const request = require('request-promise');
-var path = require('path')
+var path = require('path');
 
 let browser;
 let page;
@@ -45,7 +45,8 @@ async function run() {
     await scrollToEnd();
 
     const items = await page.$$('div.Collection-Item');
-    console.log('items', items.length);
+    const count = items.length;
+    console.log('Count:', count);
 
     const pinIds = [];
     for (let index = 0; index < items.length; index++) {
@@ -54,14 +55,13 @@ async function run() {
         pinIds.push(pinId);
     }
 
-    console.log(pinIds);
-
     for (let index = 0; index < pinIds.length; index++) {
         const pinId = pinIds[index];
         try {
+            console.log(`Pin #${index}/${count}, pinId: ${pinId}`);
             await downloadPinImage(pinId);
         } catch (err) {
-            console.log('Could not save pin:', err);
+            console.log(`Could not save pin ${pinId} `, err);
         }
     }
 
@@ -74,10 +74,14 @@ async function run() {
 async function downloadPinImage(pinId) {
     const pinUrl = `https://hu.pinterest.com/pin/${pinId}/`
 
-    await page.goto(pinUrl, {waitUntil: 'domcontentloaded'});
+    await page.goto(pinUrl, {
+        waitUntil: 'networkidle2',
+        timeout: 30000
+    });
 
     await page.waitForSelector('div[data-test-id="pin-action-bar"]')
-    await page.click('div[data-test-id="pin-action-bar"]');
+
+    await clickMenuAndFindDownloadButton();
 
     const url = await pressDownloadAndInterceptUrl();
 
@@ -86,11 +90,26 @@ async function downloadPinImage(pinId) {
 
 }
 
+async function clickMenuAndFindDownloadButton() {
+    let error;
+    for (let index = 1; index <= 3; index++) {
+        try {
+            await page.click('div[data-test-id="pin-action-bar"]');
+            await page.waitForSelector('div[data-test-id="pin-action-dropdown-download"]', { timeout: 3000 });
+            return;
+        } catch (err) {
+            error = err;
+            console.log(`Failed to find download button. (Try #${index})`);
+        }
+    }
+    throw error;
+}
+
 async function pressDownloadAndInterceptUrl() {
     let resolveUrl;
     const interceptedUrl = new Promise((resolve) => { resolveUrl = resolve });
 
-    const handler = request => {
+    const handler = async request => {
         try {
             // console.log(request.url());
             if (request.url().startsWith('https://i.pinimg.com/originals/')) {
@@ -99,7 +118,9 @@ async function pressDownloadAndInterceptUrl() {
             } else {
                 request.continue();
             }
-        } catch (err) { }
+        } catch (err) {
+            console.log('waaat', err);
+        }
     };
 
     await page.setRequestInterception(true);
